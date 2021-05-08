@@ -63,7 +63,7 @@ distances = [
 distances = makeDict([Cities, Cities], distances, 0)
 
 # truck_no = range(1, 21)
-truck_no = range(1, 16)
+truck_no = range(1, 21)
 month_type = "buy sell".split()
 truck_sale = [(n, t) for n in truck_no for t in month_type]
 truck_sale_vars = LpVariable.dicts("Truck", (truck_no, month_type), 0, 12, LpInteger)
@@ -73,6 +73,7 @@ base_routes = [(seller, client) for seller in base_factories for client in base_
 routes = acid_routes + base_routes
 route_info = [(n, r) for n in truck_no for r in routes]
 route_info_vars = LpVariable.dicts("Route", (truck_no, routes), 0, None, LpInteger)
+# todo: add month index to keep more details
 
 prob = LpProblem("Chemical_Products_Transportation_Problem")
 
@@ -107,9 +108,7 @@ for n in truck_no:
         for b_c in base_clients:
             tot_hours += route_info_vars[n][(b_f, b_c)] * round_trip_time(b_f, b_c)
     prob += (truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * hours_in_month >= tot_hours, \
-            "Truck {} Time Check".format(n)
-
-# todo: add constraint minimizing downtime of trucks
+            "Truck {} time check".format(n)
 
 # todo: preferably purchase the trucks as late as possible to use them the following year with minimal downtime
 
@@ -136,11 +135,12 @@ for route in routes:
         if route_info_vars[no][route].varValue > 0:
             no_tonnes = int(floor(truck_max_capacity * route_info_vars[no][route].varValue))
             no_trips = route_info_vars[no][route].varValue
-            time_trip = int(2 * (distances[route[0]][route[1]]/truck_speed + 1))
+            time_trip = int(2 * (distances[route[0]][route[1]] / truck_speed + 1))
             no_hours = int(no_trips * time_trip)
             avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
             avail_hours = avail_months * 4 * 5 * 8
-            print("Truck", no, "delivers", no_tonnes, "tonnes of", product, "over", no_trips, str(time_trip) + "-hour round trips, taking", no_hours,
+            print("Truck", no, "delivers", no_tonnes, "tonnes of", product, "over", no_trips,
+                  str(time_trip) + "-hour round trips, taking", no_hours,
                   "hours over its available", avail_hours, "hours.")
             total_delivered += truck_max_capacity * route_info_vars[no][route].varValue
     print("Total delivered to", route[1], "is", total_delivered, "\n")
@@ -149,18 +149,36 @@ total_idle_hours = 0
 total_avail_hours = 0
 
 for no in truck_no:
+    # hybrid = False
     if truck_sale_vars[no]["sell"].varValue != truck_sale_vars[no]["buy"].varValue:
+        # acid, base = False, False
         no_total_hours = 0
         for route in routes:
+            # if route[0] == "Anvers" and route_info_vars[no][route].varValue > 0:
+            #     acid = True
+            # if route[0] == "Liege" and route_info_vars[no][route].varValue > 0:
+            #     base = True
             no_trips = route_info_vars[no][route].varValue
-            time_trip = int(2 * (distances[route[0]][route[1]]/truck_speed + 1))
-            no_hours = int(no_trips * time_trip)
+            time_trip = (2 * ((distances[route[0]][route[1]] / truck_speed) + 1))
+            no_hours = (no_trips * time_trip)
             no_total_hours += no_hours
+        # hybrid = acid and base
+        # if hybrid:
+        #     no_total_hours = cleaning_time
+        #     print("Truck no {} delivers both acids and bases.".format(no))
         no_avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
         no_avail_hours = no_avail_months * 4 * 5 * 8
         no_idle_hours = no_avail_hours - no_total_hours
-        efficiency = int((no_total_hours / no_avail_hours) * 100)
-        print("Truck number {} will use {} hours of its available {} hours, i.e. {}%.".format(no, no_total_hours, no_avail_hours, efficiency))
+        efficiency = (no_total_hours / no_avail_hours) * 100
+        # print(
+        #     "Truck number {} will use {} hours of its available {} hours, i.e. {}%. Total idle time is {} hours.".format(
+        #         no, round(no_total_hours, 2),
+        #         round(no_avail_hours, 2),
+        #         round(efficiency, 2), round(no_idle_hours, 2)))
+        print(
+            "Truck number {} will use {} hours of its available {} hours.\nTotal idle time is {} hours.\nTime efficiency is {}%.\n".format(
+                no, round(no_total_hours, 2), int(no_avail_hours), round(no_idle_hours, 2), round(efficiency, 2))
+        )
         total_idle_hours += no_idle_hours
         total_avail_hours += no_avail_hours
 
