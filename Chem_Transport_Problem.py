@@ -62,7 +62,6 @@ distances = [
 ]
 distances = makeDict([Cities, Cities], distances, 0)
 
-# truck_no = range(1, 21)
 truck_no = range(1, 21)
 month_type = "buy sell".split()
 truck_sale = [(n, t) for n in truck_no for t in month_type]
@@ -76,10 +75,6 @@ route_info_vars = LpVariable.dicts("Route", (truck_no, routes), 0, None, LpInteg
 # todo: add month index to keep more details
 
 prob = LpProblem("Chemical_Products_Transportation_Problem")
-
-# prob += lpSum(
-#     (truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * 167 for n in truck_no
-# ), "Maintenance costs"
 
 maintenance_vector = [(truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * 167 for n in truck_no]
 gas_vector = [(route_info_vars[n][route]) * distances[route[0]][route[1]] * 2 for route in routes for n in truck_no]
@@ -95,7 +90,8 @@ prob += lpSum(
 
 prob += lpSum(route_info_vars[n][("Anvers", "Liege")] for n in truck_no) >= min_trips("Liege") - 1, "Liege Acid Trips"
 for b_c in base_clients:
-    prob += lpSum(route_info_vars[n][("Liege", b_c)] for n in truck_no) >= min_trips(b_c) - 1, "{} Base Trips".format(b_c)
+    prob += lpSum(route_info_vars[n][("Liege", b_c)] for n in truck_no) >= min_trips(b_c) - 1, "{} Base Trips".format(
+        b_c)
 
 for n in truck_no:
     # todo: add washing time for trucks delivering acids and bases
@@ -149,23 +145,23 @@ total_idle_hours = 0
 total_avail_hours = 0
 
 for no in truck_no:
-    # hybrid = False
+    hybrid = False
     if truck_sale_vars[no]["sell"].varValue != truck_sale_vars[no]["buy"].varValue:
-        # acid, base = False, False
+        acid, base = False, False
         no_total_hours = 0
         for route in routes:
-            # if route[0] == "Anvers" and route_info_vars[no][route].varValue > 0:
-            #     acid = True
-            # if route[0] == "Liege" and route_info_vars[no][route].varValue > 0:
-            #     base = True
+            if route[0] == "Anvers" and route_info_vars[no][route].varValue > 0:
+                acid = True
+            if route[0] == "Liege" and route_info_vars[no][route].varValue > 0:
+                base = True
             no_trips = route_info_vars[no][route].varValue
             time_trip = (2 * ((distances[route[0]][route[1]] / truck_speed) + 1))
             no_hours = (no_trips * time_trip)
             no_total_hours += no_hours
-        # hybrid = acid and base
-        # if hybrid:
+        hybrid = acid and base
+        if hybrid:
         #     no_total_hours = cleaning_time
-        #     print("Truck no {} delivers both acids and bases.".format(no))
+            print("Truck no {} delivers both acids and bases.".format(no))
         no_avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
         no_avail_hours = no_avail_months * 4 * 5 * 8
         no_idle_hours = no_avail_hours - no_total_hours
@@ -184,8 +180,9 @@ for no in truck_no:
 
 idle_percent = int((total_idle_hours / total_avail_hours) * 100)
 
-print("\nTotal number of idle hours is", total_idle_hours, "out of", total_avail_hours, "available hours, i.e.",
-      idle_percent, "%.\n")
+print("Total number of idle hours is {} out of {} available hours, i.e. {}%.\n".format(
+    round(total_idle_hours, 2), total_avail_hours, round(idle_percent, 2))
+)
 
 trucks_to_buy = len(truck_no)
 for no in truck_no:
