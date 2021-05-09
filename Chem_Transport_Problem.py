@@ -2,11 +2,11 @@ from pulp import *
 from math import ceil, floor
 
 
-def min_trips(city):
-    if after_18_months:
-        result = ceil(annual_demand_2[city] / truck_max_capacity)
-    else:
+def min_trips(city, year):
+    if year < 3:
         result = ceil(annual_demand_1[city] / truck_max_capacity)
+    else:
+        result = ceil(annual_demand_2[city] / truck_max_capacity)
     return result
 
 
@@ -63,48 +63,47 @@ distances = [
 distances = makeDict([Cities, Cities], distances, 0)
 
 truck_no = range(1, 21)
+years = range(1)
 month_type = "buy sell".split()
 truck_sale = [(n, t) for n in truck_no for t in month_type]
-truck_sale_vars = LpVariable.dicts("Truck", (truck_no, month_type), 0, 12, LpInteger)
+truck_sale_vars = LpVariable.dicts("Truck", (truck_no, month_type), 0, len(years)*12, LpInteger)
 
 acid_routes = [(seller, client) for seller in acid_factories for client in acid_clients]
 base_routes = [(seller, client) for seller in base_factories for client in base_clients]
 routes = acid_routes + base_routes
 route_info = [(n, r) for n in truck_no for r in routes]
-route_info_vars = LpVariable.dicts("Route", (truck_no, routes), 0, None, LpInteger)
+# supply of one truck on one route during one year
+route_info_vars = LpVariable.dicts("Route", (truck_no, routes, years), 0, None, LpInteger)
 # todo: add month index to keep more details
 
-prob = LpProblem("Chemical_Products_Transportation_Problem")
+prob = LpProblem("Chemical_Products_Transportation_Problem", LpMinimize)
 
 maintenance_vector = [(truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * 167 for n in truck_no]
-gas_vector = [(route_info_vars[n][route]) * distances[route[0]][route[1]] * 2 for route in routes for n in truck_no]
+gas_vector = [(route_info_vars[n][route][y]) * distances[route[0]][route[1]] * 2 for route in routes for n in truck_no for y in years]
 # purchase_vector = [floor(truck_sale_vars[n]["sell"] * 0.084) * 40000 for n in truck_no]
 
 prob += lpSum(
-    # gas_vector
-    # +
     maintenance_vector
-    # +
-    # purchase_vector
 ), "Maintenance costs"
 
-prob += lpSum(route_info_vars[n][("Anvers", "Liege")] for n in truck_no) >= min_trips("Liege") - 1, "Liege Acid Trips"
-for b_c in base_clients:
-    prob += lpSum(route_info_vars[n][("Liege", b_c)] for n in truck_no) >= min_trips(b_c) - 1, "{} Base Trips".format(
-        b_c)
+for y in years:
+    prob += lpSum(route_info_vars[n][("Anvers", "Liege")][y] for n in truck_no) == min_trips("Liege", y) - 1, "Liege acid supply during year {}".format(y)
+    for b_c in base_clients:
+        prob += lpSum(route_info_vars[n][("Liege", b_c)][y] for n in truck_no) == min_trips(b_c, y) - 1, "{} base supply during year {}".format(b_c, y)
 
 for n in truck_no:
     # todo: add washing time for trucks delivering acids and bases
     # todo: add travel time for trucks going from the base factory to the acid factory and vice versa
-    tot_hours = 0
-    for a_f in acid_factories:
-        for a_c in acid_clients:
-            tot_hours += route_info_vars[n][(a_f, a_c)] * round_trip_time(a_f, a_c)
-    for b_f in base_factories:
-        for b_c in base_clients:
-            tot_hours += route_info_vars[n][(b_f, b_c)] * round_trip_time(b_f, b_c)
-    prob += (truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * hours_in_month >= tot_hours, \
-            "Truck {} time check".format(n)
+    for y in years:
+        tot_hours = 0
+        for a_f in acid_factories:
+            for a_c in acid_clients:
+                tot_hours += route_info_vars[n][(a_f, a_c)][y] * round_trip_time(a_f, a_c)
+        for b_f in base_factories:
+            for b_c in base_clients:
+                tot_hours += route_info_vars[n][(b_f, b_c)][y] * round_trip_time(b_f, b_c)
+        prob += (truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * hours_in_month >= tot_hours, \
+                "Truck {} time check during year {}".format(n, y)
 
 # todo: preferably purchase the trucks as late as possible to use them the following year with minimal downtime
 
@@ -117,7 +116,7 @@ for n in truck_no:
 # todo: add another algorithm going through all the cities and supplying the remaining tonnes
 
 prob.writeLP("Chem_Transport_Problem.lp")
-status = prob.solve(solver=GLPK(msg=True, keepFiles=True))
+status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "60"]))
 
 for route in routes:
     product = ""
@@ -127,61 +126,58 @@ for route in routes:
         product = "base"
     print("{} demand for {} is {} tonnes.".format(route[1], product, annual_demand_1[route[1]]))
     total_delivered = 0
-    for no in truck_no:
-        if route_info_vars[no][route].varValue > 0:
-            no_tonnes = int(floor(truck_max_capacity * route_info_vars[no][route].varValue))
-            no_trips = route_info_vars[no][route].varValue
-            time_trip = int(2 * (distances[route[0]][route[1]] / truck_speed + 1))
-            no_hours = int(no_trips * time_trip)
-            avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
-            avail_hours = avail_months * 4 * 5 * 8
-            print("Truck", no, "delivers", no_tonnes, "tonnes of", product, "over", no_trips,
-                  str(time_trip) + "-hour round trips, taking", no_hours,
-                  "hours over its available", avail_hours, "hours.")
-            total_delivered += truck_max_capacity * route_info_vars[no][route].varValue
-    print("Total delivered to", route[1], "is", total_delivered, "\n")
+    for y in years:
+        year_delivered = 0
+        for no in truck_no:
+            if route_info_vars[no][route][y].varValue > 0:
+                no_tonnes = int(floor(truck_max_capacity * route_info_vars[no][route][y].varValue))
+                no_trips = route_info_vars[no][route][y].varValue
+                time_trip = int(2 * (distances[route[0]][route[1]] / truck_speed + 1))
+                no_hours = int(no_trips * time_trip)
+                avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
+                avail_hours = avail_months * 4 * 5 * 8
+                print("Truck {} delivers {} tonnes during year {}.".format(no, no_tonnes, y))
+                year_delivered += truck_max_capacity * route_info_vars[no][route][y].varValue
+        total_delivered += year_delivered
+        print("Total delivered to {} during year {} is {}.".format(route[1], y, year_delivered))
+    print("")
 
 total_idle_hours = 0
 total_avail_hours = 0
 
 for no in truck_no:
     hybrid = False
-    if truck_sale_vars[no]["sell"].varValue != truck_sale_vars[no]["buy"].varValue:
-        acid, base = False, False
-        no_total_hours = 0
-        for route in routes:
-            if route[0] == "Anvers" and route_info_vars[no][route].varValue > 0:
-                acid = True
-            if route[0] == "Liege" and route_info_vars[no][route].varValue > 0:
-                base = True
-            no_trips = route_info_vars[no][route].varValue
-            time_trip = (2 * ((distances[route[0]][route[1]] / truck_speed) + 1))
-            no_hours = (no_trips * time_trip)
-            no_total_hours += no_hours
-        hybrid = acid and base
-        if hybrid:
-        #     no_total_hours = cleaning_time
-            print("Truck no {} delivers both acids and bases.".format(no))
-        no_avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
-        no_avail_hours = no_avail_months * 4 * 5 * 8
-        no_idle_hours = no_avail_hours - no_total_hours
-        efficiency = (no_total_hours / no_avail_hours) * 100
-        # print(
-        #     "Truck number {} will use {} hours of its available {} hours, i.e. {}%. Total idle time is {} hours.".format(
-        #         no, round(no_total_hours, 2),
-        #         round(no_avail_hours, 2),
-        #         round(efficiency, 2), round(no_idle_hours, 2)))
-        print(
-            "Truck number {} will use {} hours of its available {} hours.\nTotal idle time is {} hours.\nTime efficiency is {}%.\n".format(
-                no, round(no_total_hours, 2), int(no_avail_hours), round(no_idle_hours, 2), round(efficiency, 2))
-        )
-        total_idle_hours += no_idle_hours
-        total_avail_hours += no_avail_hours
+    for y in years:
+        if truck_sale_vars[no]["sell"].varValue != truck_sale_vars[no]["buy"].varValue:
+            acid, base = False, False
+            no_total_hours = 0
+            for route in routes:
+                if route[0] == "Anvers" and route_info_vars[no][route][y].varValue > 0:
+                    acid = True
+                if route[0] == "Liege" and route_info_vars[no][route][y].varValue > 0:
+                    base = True
+                no_trips = route_info_vars[no][route][y].varValue
+                time_trip = (2 * ((distances[route[0]][route[1]] / truck_speed) + 1))
+                no_hours = (no_trips * time_trip)
+                no_total_hours += no_hours
+            hybrid = acid and base
+            if hybrid:
+                print("Truck no {} delivers both acids and bases.".format(no))
+            no_avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
+            no_avail_hours = no_avail_months * 4 * 5 * 8
+            no_idle_hours = no_avail_hours - no_total_hours
+            efficiency = (no_total_hours / no_avail_hours) * 100
+            print(
+                "Truck number {} will use {} hours of its available {} hours.\nTotal idle time is {} hours.\nTime efficiency is {}%.\n".format(
+                    no, round(no_total_hours, 2), int(no_avail_hours), round(no_idle_hours, 2), round(efficiency, 2))
+            )
+            total_idle_hours += no_idle_hours
+            total_avail_hours += no_avail_hours
 
-idle_percent = int((total_idle_hours / total_avail_hours) * 100)
+idle_percent = (total_idle_hours / total_avail_hours)
 
 print("Total number of idle hours is {} out of {} available hours, i.e. {}%.\n".format(
-    round(total_idle_hours, 2), total_avail_hours, round(idle_percent, 2))
+    round(total_idle_hours, 2), total_avail_hours, round(idle_percent, 4))
 )
 
 trucks_to_buy = len(truck_no)
