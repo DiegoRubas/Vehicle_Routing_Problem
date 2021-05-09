@@ -62,11 +62,11 @@ distances = [
 ]
 distances = makeDict([Cities, Cities], distances, 0)
 
-truck_no = range(1, 21)
-years = range(1)
+truck_no = range(20)
+years = range(5)
 months = range(len(years) * 12)
 truck_status = LpVariable.dicts("truck_status", (truck_no, months), cat='Binary')
-# truck_buy = LpVariable.dicts("truck_buy", (truck_no, months), 0, 30, LpInteger)
+truck_buy = LpVariable.dicts("truck_buy", (truck_no, months), 0, 30, LpInteger)
 # truck_switch = LpVariable.dicts
 
 acid_routes = [(seller, client) for seller in acid_factories for client in acid_clients]
@@ -82,9 +82,12 @@ prob = LpProblem("Chemical_Products_Transportation_Problem", LpMinimize)
 maintenance_vector = [(truck_status[n][m] * 167 for n in truck_no for m in months)]
 gas_vector = [(route_info_vars[n][route][y]) * distances[route[0]][route[1]] * 2 for route in routes for n in truck_no for y in years]
 # purchase_vector = [floor(truck_sale_vars[n]["sell"] * 0.084) * 40000 for n in truck_no]
+purchase_vector = [truck_buy[n][m] * 40000 for n in truck_no for m in months]
 
 prob += lpSum(
     maintenance_vector
+    +
+    purchase_vector
 ), "Maintenance costs"
 
 for y in years:
@@ -106,15 +109,18 @@ for n in truck_no:
         prob += lpSum(truck_status[n][m] * hours_in_month for m in range(y*12, (y+1)*12)) >= tot_hours, \
                 "Truck {} time check during year {}".format(n, y)
 
-# for m in months:
-#     for t in truck_no:
-#         if m == 0:
-#             if t in range(5):
-#                 model += truck_buy[t][m]
-#             else:
-#         else:
-
-
+for m in months:
+    for t in truck_no:
+        if m == 0 and t not in range(5): # if first month and not in the first 5 trucks
+            prob += truck_buy[t][m] == truck_status[t][m]   # status is bought if it's available
+                                                            # status is nothing if it's not available
+        elif m == 0 and t in range(5): # if first month and in the first 5 trucks
+            prob += truck_status[t][m] == 1
+            prob += truck_buy[t][m] == 0
+        else:
+            prob += truck_buy[t][m] >= truck_status[t][m] - truck_status[t][m-1]
+            prob += truck_buy[t][m] <= 1 - truck_status[t][m-1]
+            prob += truck_buy[t][m] <= truck_status[t][m]
 
 # todo: preferably purchase the trucks as late as possible to use them the following year with minimal downtime
 
@@ -127,7 +133,7 @@ for n in truck_no:
 # todo: add another algorithm going through all the cities and supplying the remaining tonnes
 
 prob.writeLP("Chem_Transport_Problem.lp")
-status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "60"]))
+status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "1800"]))
 
 for route in routes:
     product = ""
@@ -161,35 +167,14 @@ for no in truck_no:
     for y in years:
         if sum([truck_status[no][m].varValue for m in range(y*12, (y+1)*12)]) > 0:
             acid, base = False, False
-            no_total_hours = 0
             for route in routes:
                 if route[0] == "Anvers" and route_info_vars[no][route][y].varValue > 0:
                     acid = True
                 if route[0] == "Liege" and route_info_vars[no][route][y].varValue > 0:
                     base = True
-                no_trips = route_info_vars[no][route][y].varValue
-                time_trip = (2 * ((distances[route[0]][route[1]] / truck_speed) + 1))
-                no_hours = (no_trips * time_trip)
-                no_total_hours += no_hours
             hybrid = acid and base
             if hybrid:
                 print("Truck no {} delivers both acids and bases.".format(no))
-            no_avail_months = sum([truck_status[no][m].varValue for m in range(y*12, (y+1)*12)])
-            no_avail_hours = no_avail_months * 4 * 5 * 8
-            no_idle_hours = no_avail_hours - no_total_hours
-            efficiency = (no_total_hours / no_avail_hours) * 100
-            print(
-                "Truck number {} will use {} hours of its available {} hours.\nTotal idle time is {} hours.\nTime efficiency is {}%.\n".format(
-                    no, round(no_total_hours, 2), int(no_avail_hours), round(no_idle_hours, 2), round(efficiency, 2))
-            )
-            total_idle_hours += no_idle_hours
-            total_avail_hours += no_avail_hours
-
-idle_percent = (total_idle_hours / total_avail_hours)
-
-print("Total number of idle hours is {} out of {} available hours, i.e. {}%.\n".format(
-    round(total_idle_hours, 2), total_avail_hours, round(idle_percent, 4))
-)
 
 for no in truck_no:
     months_list = []
@@ -200,7 +185,22 @@ for no in truck_no:
         print("You must have truck number {} available during the following months: {}.".format(no, months_list))
 
 for t in truck_no:
-    rent_list = []
+    rent_list, buy_list = [], []
     for m in months:
         rent_list.append(truck_status[t][m].varValue)
-    print("truck no {}: {}".format(t, rent_list))
+        buy_list.append(truck_buy[t][m].varValue)
+    print("truck no {}:\n{}\n{}\n{}\n{}\n{} purchased {} times.".format(
+        t, rent_list[0:12], rent_list[12:24], rent_list[24:36], rent_list[36:48], rent_list[48:60], buy_list.count(1)))
+
+for t in truck_no:
+    rent_list, buy_list = [], []
+    rent_price, buy_price = 0, 0
+    for m in months:
+        rent_list.append(truck_status[t][m].varValue)
+        buy_list.append(truck_buy[t][m].varValue)
+    buy_price += buy_list.count(1) * 40000
+    rent_price += int(rent_list.count(1) * 166.67)
+    total_price = buy_price + rent_price
+    print("truck number {}: purchase price = {} ; rent price = {} ; total price = {}".format(
+        t, buy_price, rent_price, total_price
+    ))
