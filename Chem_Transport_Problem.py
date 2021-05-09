@@ -64,9 +64,10 @@ distances = makeDict([Cities, Cities], distances, 0)
 
 truck_no = range(1, 21)
 years = range(1)
-month_type = "buy sell".split()
-truck_sale = [(n, t) for n in truck_no for t in month_type]
-truck_sale_vars = LpVariable.dicts("Truck", (truck_no, month_type), 0, len(years)*12, LpInteger)
+months = range(len(years) * 12)
+truck_status = LpVariable.dicts("truck_status", (truck_no, months), cat='Binary')
+# truck_buy = LpVariable.dicts("truck_buy", (truck_no, months), 0, 30, LpInteger)
+# truck_switch = LpVariable.dicts
 
 acid_routes = [(seller, client) for seller in acid_factories for client in acid_clients]
 base_routes = [(seller, client) for seller in base_factories for client in base_clients]
@@ -78,7 +79,7 @@ route_info_vars = LpVariable.dicts("Route", (truck_no, routes, years), 0, None, 
 
 prob = LpProblem("Chemical_Products_Transportation_Problem", LpMinimize)
 
-maintenance_vector = [(truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * 167 for n in truck_no]
+maintenance_vector = [(truck_status[n][m] * 167 for n in truck_no for m in months)]
 gas_vector = [(route_info_vars[n][route][y]) * distances[route[0]][route[1]] * 2 for route in routes for n in truck_no for y in years]
 # purchase_vector = [floor(truck_sale_vars[n]["sell"] * 0.084) * 40000 for n in truck_no]
 
@@ -102,8 +103,18 @@ for n in truck_no:
         for b_f in base_factories:
             for b_c in base_clients:
                 tot_hours += route_info_vars[n][(b_f, b_c)][y] * round_trip_time(b_f, b_c)
-        prob += (truck_sale_vars[n]["sell"] - truck_sale_vars[n]["buy"]) * hours_in_month >= tot_hours, \
+        prob += lpSum(truck_status[n][m] * hours_in_month for m in range(y*12, (y+1)*12)) >= tot_hours, \
                 "Truck {} time check during year {}".format(n, y)
+
+# for m in months:
+#     for t in truck_no:
+#         if m == 0:
+#             if t in range(5):
+#                 model += truck_buy[t][m]
+#             else:
+#         else:
+
+
 
 # todo: preferably purchase the trucks as late as possible to use them the following year with minimal downtime
 
@@ -134,7 +145,7 @@ for route in routes:
                 no_trips = route_info_vars[no][route][y].varValue
                 time_trip = int(2 * (distances[route[0]][route[1]] / truck_speed + 1))
                 no_hours = int(no_trips * time_trip)
-                avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
+                avail_months = sum([truck_status[no][m].varValue for m in range(y*12, (y+1)*12)])
                 avail_hours = avail_months * 4 * 5 * 8
                 print("Truck {} delivers {} tonnes during year {}.".format(no, no_tonnes, y))
                 year_delivered += truck_max_capacity * route_info_vars[no][route][y].varValue
@@ -148,7 +159,7 @@ total_avail_hours = 0
 for no in truck_no:
     hybrid = False
     for y in years:
-        if truck_sale_vars[no]["sell"].varValue != truck_sale_vars[no]["buy"].varValue:
+        if sum([truck_status[no][m].varValue for m in range(y*12, (y+1)*12)]) > 0:
             acid, base = False, False
             no_total_hours = 0
             for route in routes:
@@ -163,7 +174,7 @@ for no in truck_no:
             hybrid = acid and base
             if hybrid:
                 print("Truck no {} delivers both acids and bases.".format(no))
-            no_avail_months = truck_sale_vars[no]["sell"].varValue - truck_sale_vars[no]["buy"].varValue
+            no_avail_months = sum([truck_status[no][m].varValue for m in range(y*12, (y+1)*12)])
             no_avail_hours = no_avail_months * 4 * 5 * 8
             no_idle_hours = no_avail_hours - no_total_hours
             efficiency = (no_total_hours / no_avail_hours) * 100
@@ -180,14 +191,16 @@ print("Total number of idle hours is {} out of {} available hours, i.e. {}%.\n".
     round(total_idle_hours, 2), total_avail_hours, round(idle_percent, 4))
 )
 
-trucks_to_buy = len(truck_no)
 for no in truck_no:
-    if truck_sale_vars[no]["sell"].varValue == truck_sale_vars[no]["buy"].varValue:
-        trucks_to_buy -= 1
+    months_list = []
+    for m in months:
+        if truck_status[no][m].varValue == 1:
+            months_list.append(m)
+    if len(months_list) > 0:
+        print("You must have truck number {} available during the following months: {}.".format(no, months_list))
 
-print("In order to achieve these results, you must buy", trucks_to_buy, "trucks.")
-
-for no in truck_no:
-    if truck_sale_vars[no]["sell"].varValue != truck_sale_vars[no]["buy"].varValue:
-        print("You must buy truck number", no, "at month", truck_sale_vars[no]["buy"].varValue, "and sell it at month",
-              str(truck_sale_vars[no]["sell"].varValue) + ".")
+for t in truck_no:
+    rent_list = []
+    for m in months:
+        rent_list.append(truck_status[t][m].varValue)
+    print("truck no {}: {}".format(t, rent_list))
