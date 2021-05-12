@@ -67,6 +67,7 @@ months = range(len(years) * 12)
 truck_status = LpVariable.dicts("truck_status", (truck_no, months), cat='Binary')
 truck_buy = LpVariable.dicts("truck_buy", (truck_no, months), 0, 1, LpInteger)
 truck_sell = LpVariable.dicts("truck_sell", (truck_no, months), 0, 1, LpInteger)
+truck_type = LpVariable.dicts("truck_type", truck_no, 0, 1, LpInteger)
 # truck_switch = LpVariable.dicts
 
 acid_routes = [(seller, client) for seller in acid_factories for client in acid_clients]
@@ -103,14 +104,12 @@ for n in truck_no:
     # todo: add washing time for trucks delivering acids and bases
     # todo: add travel time for trucks going from the base factory to the acid factory and vice versa
     for y in years:
-        tot_hours = 0
-        for a_f in acid_factories:
-            for a_c in acid_clients:
-                tot_hours += route_info_vars[n][(a_f, a_c)][y] * round_trip_time(a_f, a_c)
-        for b_f in base_factories:
-            for b_c in base_clients:
-                tot_hours += route_info_vars[n][(b_f, b_c)][y] * round_trip_time(b_f, b_c)
-        prob += lpSum(truck_status[n][m] * hours_in_month for m in range(y * 12, (y + 1) * 12)) >= tot_hours, \
+        acid_hours = lpSum([route_info_vars[n][(a_f, a_c)][y] * round_trip_time(a_f, a_c)
+                            for a_f in acid_factories for a_c in acid_clients])
+        base_hours = lpSum([route_info_vars[n][(b_f, b_c)][y] * round_trip_time(b_f, b_c)
+                           for b_f in base_factories for b_c in base_clients])
+        prob += lpSum(truck_status[n][m] * hours_in_month for m in range(y * 12, (y + 1) * 12)) >= \
+                acid_hours + base_hours, \
                 "Truck {} time check during year {}".format(n, y)
 
 for m in months:  # remplit la truck_buy list selon la truck_status list
@@ -126,7 +125,7 @@ for m in months:  # remplit la truck_buy list selon la truck_status list
             prob += truck_buy[t][m] <= 1 - truck_status[t][m - 1]
             prob += truck_buy[t][m] <= truck_status[t][m]
 
-for m in months:  # remplit la truck_sell list selon la truck_status list
+for m in months:  # fills the truck_sell list using the truck_status list
     for t in truck_no:
         if m == 0:
             prob += truck_sell[t][m] == 0

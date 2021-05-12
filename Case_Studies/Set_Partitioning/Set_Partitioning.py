@@ -6,6 +6,8 @@ Author: Diego Rubas 2021
 
 from pulp import *
 
+
+
 max_tables = 5
 max_table_size = 4
 guests = "A B C D E F G H I J K L M N O P Q R".split()
