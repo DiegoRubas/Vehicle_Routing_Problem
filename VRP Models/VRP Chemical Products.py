@@ -159,33 +159,109 @@ for n in vehicle_numbers:
             total += truck_route_vars[t] * calc_time(t[1])
     prob += total <= lpSum(truck_status[n][m] * hours_in_month for m in range(12))
 
-# #contraintes pour le nombre de mois
-# for m in months:  # remplit la truck_buy list selon la truck_status list
-#     for t in truck_no:
-#         if m == 0 and t not in range(5):  # if first month and not in the first 5 trucks
-#             prob += truck_buy[t][m] == truck_status[t][m]  # status is bought if it's available
-#             # status is nothing if it's not available
-#         elif m == 0 and t in range(5):  # if first month and in the first 5 trucks
-#             prob += truck_status[t][m] == 1
-#             prob += truck_buy[t][m] == 0
-#         else:
-#             prob += truck_buy[t][m] >= truck_status[t][m] - truck_status[t][m - 1]
-#             prob += truck_buy[t][m] <= 1 - truck_status[t][m - 1]
-#             prob += truck_buy[t][m] <= truck_status[t][m]
-#
-# for m in months:  # fills the truck_sell list using the truck_status list
-#     for t in truck_no:
-#         if m == 0:
-#             prob += truck_sell[t][m] == 0
-#         else:
-#             prob += truck_sell[t][m] >= truck_status[t][m - 1] - truck_status[t][m]
-#             prob += truck_sell[t][m] <= 1 - truck_status[t][m]
-#             prob += truck_sell[t][m] <= truck_status[t][m]
+#contraintes pour le nombre de mois
+for m in months:  # remplit la truck_buy list selon la truck_status list
+    for t in vehicle_numbers:
+        if m == 0 and t not in range(5):  # if first month and not in the first 5 trucks
+            prob += truck_buy[t][m] == truck_status[t][m]  # status is bought if it's available
+            # status is nothing if it's not available
+        elif m == 0 and t in range(5):  # if first month and in the first 5 trucks
+            prob += truck_status[t][m] == 1
+            prob += truck_buy[t][m] == 0
+        else:
+            prob += truck_buy[t][m] >= truck_status[t][m] - truck_status[t][m - 1]
+            prob += truck_buy[t][m] <= 1 - truck_status[t][m - 1]
+            prob += truck_buy[t][m] <= truck_status[t][m]
+
+for m in months:  # fills the truck_sell list using the truck_status list
+    for t in vehicle_numbers:
+        if m == 0:
+            prob += truck_sell[t][m] == 0
+        else:
+            prob += truck_sell[t][m] >= truck_status[t][m - 1] - truck_status[t][m]
+            prob += truck_sell[t][m] <= 1 - truck_status[t][m]
+            prob += truck_sell[t][m] <= truck_status[t][m]
 
 
 prob.writeLP("Chemical_Products_VRP.lp")
-status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "10"]))
+status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "30"]))
 
 for i in truck_routes:
     if truck_route_vars[i].varValue is not None and truck_route_vars[i].varValue > 0:
         print("Truck number {} goes on the route {} {} times.".format(i[0], i[1], truck_route_vars[i].varValue))
+
+# for route in routes:
+#     product = ""
+#     if route[0] == "Anvers":
+#         product = "acid"
+#     else:
+#         product = "base"
+#     print("{} demand for {} is {} tonnes.".format(route[1], product, annual_demand_1[route[1]]))
+#     total_delivered = 0
+#     for y in years:
+#         year_delivered = 0
+#         for no in truck_no:
+#             if route_info_vars[no][route][y].varValue > 0:
+#                 no_tonnes = int(floor(truck_max_capacity * route_info_vars[no][route][y].varValue))
+#                 no_trips = route_info_vars[no][route][y].varValue
+#                 time_trip = int(2 * (distances[route[0]][route[1]] / truck_speed + 1))
+#                 no_hours = int(no_trips * time_trip)
+#                 avail_months = sum([truck_status[no][m].varValue for m in range(y * 12, (y + 1) * 12)])
+#                 avail_hours = avail_months * 4 * 5 * 8
+#                 print("Truck {} delivers {} tonnes during year {}.".format(no, no_tonnes, y))
+#                 year_delivered += truck_max_capacity * route_info_vars[no][route][y].varValue
+#         total_delivered += year_delivered
+#         print("Total delivered to {} during year {} is {}.".format(route[1], y, year_delivered))
+#     print("")
+
+# for no in vehicle_numbers:
+#     hybrid = False
+#     for y in years:
+#         if sum([truck_status[no][m].varValue for m in range(y * 12, (y + 1) * 12)]) > 0:
+#             acid, base = False, False
+#             for route in all_routes:
+#                 if route[0] == "Anvers" and route_info_vars[no][route][y].varValue > 0:
+#                     acid = True
+#                 if route[0] == "Liege" and route_info_vars[no][route][y].varValue > 0:
+#                     base = True
+#             hybrid = acid and base
+#             if hybrid:
+#                 print("Truck no {} delivers both acids and bases.".format(no))
+
+for no in vehicle_numbers:
+    months_list = []
+    for m in months:
+        if truck_status[no][m].varValue == 1:
+            months_list.append(m)
+    if len(months_list) > 0:
+        print("You must have truck number {} available during the following months: {}.".format(no, months_list))
+
+for t in vehicle_numbers:
+    rent_list, buy_list, sell_list = [], [], []
+    for m in months:
+        rent_list.append(truck_status[t][m].varValue)
+        buy_list.append(truck_buy[t][m].varValue)
+        sell_list.append(truck_sell[t][m].varValue)
+    print("truck no {} rent: {}\n buy: {}\nsell: {}".format(
+        t, rent_list, buy_list, sell_list))
+
+obj_func = 0
+
+for t in vehicle_numbers:
+    rent_list, buy_list, sell_list = [], [], []
+    rent_price, buy_price, sell_price = 0, 0, 0
+    for m in months:
+        rent_list.append(truck_status[t][m].varValue)
+        buy_list.append(truck_buy[t][m].varValue)
+        sell_list.append(truck_sell[t][m].varValue)
+    buy_price += buy_list.count(1) * 40000
+    sell_price += sell_list.count(1) * 20000
+    rent_price += rent_list.count(1) * 166.67
+    total_price = buy_price + rent_price - sell_price
+    obj_func += total_price
+    if total_price > 0:
+        print("truck number {}: purchase price = {} ; rent price = {} ; sell price = {} ; total price = {}".format(
+            t, buy_price, int(rent_price), sell_price, int(total_price)
+        ))
+
+print("total cost is {}.".format(int(obj_func)))
