@@ -145,7 +145,7 @@ for m in months:  # fills the truck_sell list using the truck_status list
 # todo: add another algorithm going through all the cities and supplying the remaining tonnes
 
 prob.writeLP("Chem_Transport_Problem.lp")
-status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "120"]))
+status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "10"]))
 
 for route in routes:
     product = ""
