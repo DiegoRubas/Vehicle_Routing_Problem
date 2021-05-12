@@ -40,6 +40,8 @@ def shortest_route(input_list):
 max_routes = 6
 max_sites = 6
 sites = "Anvers Bruxelles Charleroi Gand Hasselt Liege".split()
+acid_depot = "Liege"
+base_depot = "Anvers"
 
 distances = [
     # Anvers Bruxelles Charleroi Gand Hasselt Liege
@@ -52,23 +54,17 @@ distances = [
 ]
 distances = makeDict([sites, sites], distances, 0)
 
+
+def calc_routes(input_depot):
+    routes = []
+    for r in poss_routes:
+        if input_depot not in r:
+            new_r = [input_depot] + r[:] + [input_depot]
+            routes.append(shortest_route(perm_route(new_r)))
+    return routes
+
+
 # create list of all possible tables
 poss_routes = [list(c) for c in allcombinations(sites, max_sites)]
-acid_routes = []
-base_routes = []
-
-for route in poss_routes:
-    if 'Liege' not in route:
-        acid_route = ['Liege'] + route[:] + ['Liege']
-        acid_routes.append(acid_route)
-    elif 'Anvers' not in route:
-        base_route = ['Anvers'] + route[:] + ['Anvers']
-        base_routes.append(base_route)
-
-for route in acid_routes:
-    best_route = shortest_route(perm_route(route))
-    print(route, calc_dist(route), best_route, calc_dist(best_route))
-
-for route in base_routes:
-    best_route = shortest_route(perm_route(route))
-    print(route, calc_dist(route), best_route, calc_dist(best_route))
+acid_routes = calc_routes(acid_depot)
+base_routes = calc_routes(base_depot)
