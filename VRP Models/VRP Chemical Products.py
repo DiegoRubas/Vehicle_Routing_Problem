@@ -64,8 +64,8 @@ sites = "Anvers Bruxelles Charleroi Gand Hasselt Liege".split()
 acid_depot = "Liege"
 base_depot = "Anvers"
 
-acid_clients = ["Liege"]
-base_clients = "Anvers Bruxelles Charleroi Gand Hasselt".split()
+acid_clients = "Anvers Bruxelles Charleroi Gand Hasselt".split()
+base_clients = ["Liege"]
 
 annual_acid_demand = {"Liege": 30000}
 annual_base_demand_1 = {"Anvers": 9000,
@@ -137,7 +137,6 @@ poss_routes = [list(c) for c in allcombinations(sites, max_sites)]
 acid_routes = calc_routes(acid_depot)
 base_routes = calc_routes(base_depot)
 all_routes = acid_routes + base_routes
-print(all_routes)
 
 prob = LpProblem("Chemical_Products_VRP", LpMinimize)
 
@@ -161,7 +160,8 @@ for site in sites:
     for t in truck_routes:
         if site in t[1][1:-1]:
             total += truck_route_vars[t] * (1/(len(t[1])-2)) * truck_max_cap
-    prob += total >= annual_demand_1_whole[site]
+    prob += total >= annual_demand_1[site] - 16.5
+    prob += total <= annual_demand_1[site]
 
 for n in vehicle_numbers:
     # todo: add washing time for trucks delivering acids and bases
@@ -252,6 +252,41 @@ for t in vehicle_numbers:
 
 print("total supply")
 for key in supply_dict:
-    print("{} : {} / {}".format(key, supply_dict[key], annual_demand_1_whole[key]))
+    print("{} : {} / {}".format(key, supply_dict[key], annual_demand_1[key]))
 
 print("total cost is {}.".format(int(obj_func)))
+
+print(annual_demand_1_rest)
+
+rest_acid_routes = [tuple(r) for r in acid_routes]
+rest_combos = [tuple(c) for c in allcombinations(rest_acid_routes, 5)]
+rest_valid_combos = []
+for combo in rest_combos:
+    a, b, c, g, h, min_delivery, max_delivery = 0, 0, 0, 0, 0, 1000, 0
+    for r in combo:
+        current_delivery = 0
+        temp_list = r[1:-1]
+        a += temp_list.count('Anvers')
+        b += temp_list.count('Bruxelles')
+        c += temp_list.count('Charleroi')
+        g += temp_list.count('Gand')
+        h += temp_list.count('Hasselt')
+        for s in temp_list:
+            current_delivery += annual_demand_1_rest[s]
+        if current_delivery > max_delivery:
+            max_delivery = current_delivery
+        if current_delivery < min_delivery:
+            min_delivery = current_delivery
+    if a == b == c == g == h == 1 and max_delivery <= 16.5 and min_delivery >= 5:
+        rest_valid_combos.append(combo)
+
+best_combo, best_time = 0, 100
+for combo in rest_valid_combos:
+    total_time = 0
+    for r in combo:
+        total_time += calc_time(r)
+    if total_time < best_time:
+        best_combo = combo
+        best_time = total_time
+
+print(best_combo, round(best_time, 2), "hours")
