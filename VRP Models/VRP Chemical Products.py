@@ -81,6 +81,18 @@ annual_base_demand_2 = {"Anvers": 9000,
 annual_demand_1 = {**annual_acid_demand, **annual_base_demand_1}
 annual_demand_2 = {**annual_acid_demand, **annual_base_demand_2}
 
+annual_demand_1_whole = {}
+annual_demand_1_rest = {}
+
+annual_demand_2_whole = {}
+annual_demand_2_rest = {}
+
+for key in annual_demand_1.keys():
+    annual_demand_1_whole[key] = (annual_demand_1[key] // 16.5) * 16.5
+    annual_demand_2_whole[key] = (annual_demand_2[key] // 16.5) * 16.5
+    annual_demand_1_rest[key] = annual_demand_1[key] % 16.5
+    annual_demand_2_rest[key] = annual_demand_2[key] % 16.5
+
 month_dict = {
     0: "January",
     1: "February",
@@ -125,6 +137,7 @@ poss_routes = [list(c) for c in allcombinations(sites, max_sites)]
 acid_routes = calc_routes(acid_depot)
 base_routes = calc_routes(base_depot)
 all_routes = acid_routes + base_routes
+print(all_routes)
 
 prob = LpProblem("Chemical_Products_VRP", LpMinimize)
 
@@ -135,6 +148,7 @@ truck_status = LpVariable.dicts("truck_status", (vehicle_numbers, months), cat='
 truck_buy = LpVariable.dicts("truck_buy", (vehicle_numbers, months), cat='Binary')
 truck_sell = LpVariable.dicts("truck_sell", (vehicle_numbers, months), cat='Binary')
 truck_type = LpVariable.dicts("truck_type", (vehicle_numbers, months), cat='Binary')
+truck_hybrid = LpVariable.dicts("truck_hybrid", vehicle_numbers, cat='Binary')
 
 truck_routes = [(v, tuple(r)) for v in vehicle_numbers for r in all_routes]
 
@@ -144,11 +158,10 @@ truck_route_vars = LpVariable.dicts("truck_route", truck_routes, 0, None, LpInte
 # annual demand met
 for site in sites:
     total = 0
-    factor = 0
     for t in truck_routes:
         if site in t[1][1:-1]:
             total += truck_route_vars[t] * (1/(len(t[1])-2)) * truck_max_cap
-    prob += total >= annual_demand_1[site]
+    prob += total >= annual_demand_1_whole[site]
 
 for n in vehicle_numbers:
     # todo: add washing time for trucks delivering acids and bases
@@ -157,7 +170,11 @@ for n in vehicle_numbers:
     for t in truck_routes:
         if t[0] == n:
             total += truck_route_vars[t] * calc_time(t[1])
+            # total += truck_hybrid[n] * (cleaning_time + calc_time(['Anvers', 'Liege']))
     prob += total <= lpSum(truck_status[n][m] * hours_in_month for m in range(12))
+
+# for n in vehicle_numbers:
+#     for t in truck_routes:
 
 for m in months:  # remplit la truck_buy list selon la truck_status list
     for t in vehicle_numbers:
@@ -186,6 +203,9 @@ prob.writeLP("Chemical_Products_VRP.lp")
 status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "60"]))
 
 obj_func = 0
+supply_dict = dict(annual_demand_1)
+for key in supply_dict.keys():
+    supply_dict[key] = 0
 
 for t in vehicle_numbers:
     rent_list, buy_list, sell_list = [], [], []
@@ -220,8 +240,18 @@ for t in vehicle_numbers:
         for route in t_routes.keys():
             total_time += calc_time(route) * t_routes[route]
             print("{} {} times for {} hours;  {} / {} hours".format(
-                route, t_routes[route], calc_time(route) * t_routes[route], total_time, avail_time
+                route, t_routes[route], round(calc_time(route) * t_routes[route], 2), round(total_time, 2), avail_time
             ))
+            for city in route[1:-1]:
+                print("supplied {} to {}".format((16.5 * t_routes[route] / (len(route) - 2)), city))
+                supply_dict[city] += (16.5 * t_routes[route] / (len(route) - 2))
+        print("current supply")
+        for key in supply_dict:
+            print("{} : {} / {}".format(key, supply_dict[key], annual_demand_1[key]))
         print("")
+
+print("total supply")
+for key in supply_dict:
+    print("{} : {} / {}".format(key, supply_dict[key], annual_demand_1_whole[key]))
 
 print("total cost is {}.".format(int(obj_func)))
