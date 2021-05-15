@@ -149,13 +149,14 @@ acid_routes = calc_routes(acid_depot)
 base_routes = calc_routes(base_depot)
 all_routes = acid_routes + base_routes
 
-max_delivery = truck_max_cap * hours_in_month / calc_time(shortest_route(all_routes))
-min_delivery = 0
+max_yearly_trips = (hours_in_month / calc_time(shortest_route(all_routes))) * 12
+min_yearly_trips = 0
 
 prob = LpProblem("Chemical_Products_VRP", LpMinimize)
 
 vehicle_numbers = range(15)
-years = range(5)
+years = range(1)
+time_limit = 5 if len(years) == 1 else 600
 months = range(len(years) * 12)
 truck_status = LpVariable.dicts("truck_status", (vehicle_numbers, months), cat='Binary')
 truck_buy = LpVariable.dicts("truck_buy", (vehicle_numbers, months), cat='Binary')
@@ -182,11 +183,11 @@ for y in years:
 for y in years:
     for t_r in truck_routes:
         if t_r[1][0] == 'Liege':
-            prob += truck_route_vars[t_r][y] >= min_delivery * truck_acid[t_r[0]]
-            prob += truck_route_vars[t_r][y] <= max_delivery * truck_acid[t_r[0]]
+            prob += truck_route_vars[t_r][y] >= min_yearly_trips * truck_acid[t_r[0]]
+            prob += truck_route_vars[t_r][y] <= max_yearly_trips * truck_acid[t_r[0]]
         else:
-            prob += truck_route_vars[t_r][y] >= min_delivery * truck_base[t_r[0]]
-            prob += truck_route_vars[t_r][y] <= max_delivery * truck_base[t_r[0]]
+            prob += truck_route_vars[t_r][y] >= min_yearly_trips * truck_base[t_r[0]]
+            prob += truck_route_vars[t_r][y] <= max_yearly_trips * truck_base[t_r[0]]
 
 for y in years:
     for n in vehicle_numbers:
@@ -197,7 +198,6 @@ for y in years:
 for y in years:
     for n in vehicle_numbers:
         total = truck_hybrid[n] * (cleaning_time + factory_switch)
-        # total = 0
         for t in truck_routes:
             if t[0] == n:
                 total += truck_route_vars[t][y] * calc_time(t[1])
@@ -247,7 +247,7 @@ prob += lpSum(
 ), "Total cost"
 
 prob.writeLP("Chemical_Products_VRP.lp")
-status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "600"]))
+status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "{}".format(time_limit)]))
 
 obj_func = 0
 
@@ -359,11 +359,59 @@ for n in bought_trucks.keys():
             print("Bought in {}, year {} and sold in {}, year {}.".format(index_to_month(buy_index), index_to_year(buy_index), index_to_month(sell_index), index_to_year(sell_index)))
         for y in years:
             print("During year {}".format(y))
-            t_routes, total_time = {}, 0
-            for r in all_routes:
+            truck_status_list = [truck_status[n][i].varValue for i in range(12)].count(1)
+            print(truck_status_list)
+            routes, t_routes, total_time = [], [], 0
+            for i in range(len(all_routes)):
+                r = tuple(all_routes[i])
                 if truck_route_vars[(n, tuple(r))][y].varValue is not None and truck_route_vars[(n, tuple(r))][y].varValue > 0:
-                    t_routes[tuple(r)] = truck_route_vars[(n, tuple(r))][y].varValue
-            for r in t_routes.keys():
-                for s in r[1:-1]:
-                    print("Supplied {} tonnes to {}.".format(truck_max_cap * t_routes[r] / (len(r) - 2), s))
-
+                    routes.append(r)
+                    t_routes.append(truck_route_vars[(n, tuple(r))][y].varValue)
+            trips_per_month = []
+            for i in range(y*12, (y+1)*12):
+                if truck_status[n][i].varValue == 1:
+                    trips_per_month.append([])
+            remaining_trips = [truck_route_vars[n, routes[k]][y].varValue for k in range(len(routes))]
+            print(remaining_trips)
+            i, j = buy_index, 0
+            total1, total2 = 0, 12 * hours_in_month
+            while i < sell_index:
+                available_hours = hours_in_month
+                no_trips = 0
+                while j < len(routes) and calc_time(routes[j]) <= available_hours and no_trips < truck_route_vars[n, routes[j]][y].varValue:
+                    no_trips += 1
+                    available_hours -= calc_time(routes[j])
+                    # print("no trips =", no_trips, "; remaining trips =", remaining_trips[j])
+                    # print("trip time =", round(calc_time(routes[j]), 2), "available hours =", round(available_hours, 1))
+                    if no_trips == remaining_trips[j] or calc_time(routes[j]) > available_hours:
+                        print("{} {} times in {}".format(routes[j], no_trips, index_to_month(i)))
+                        trips_per_month[i] = [(routes[j], no_trips)]
+                        total1 += no_trips * calc_time(routes[j])
+                        remaining_trips[j] -= no_trips
+                        no_trips = 0
+                        if remaining_trips[j] == 0:
+                            j += 1
+                i += 1
+            print(total1, total2)
+            for i in trips_per_month:
+                print(i)
+            for i in range(len(t_routes)):
+                r, t = routes[i], t_routes[i]
+                p = "acid" if r[0] == "Liege" else "base"
+                pl = 's' if t > 3 else ''
+                if i > 0:
+                    r2 = routes[i-1]
+                    if (r[0] == "Anvers" and r2[0] == "Liege") or (r[0] == "Liege" and r2[0] == "Anvers"):
+                        print("Stops for cleaning time and travels to from {} to {}.".format(r2[0], r[0]))
+                if len(r) == 3:
+                    print("Makes {} round trip{} ({} hours per trip) from {} to {}, supplying {} tonnes of {}.".format(
+                        t, pl, round(calc_time(r), 2), r[0], r[1], truck_max_cap * t / (len(r) - 2), p)
+                    )
+                elif len(r) == 4:
+                    print("Makes {} round trip{} ({} hours per trip) from {} to {} and {}, supplying {} tonnes of {} to each.".format(
+                        t, pl, round(calc_time(r)),  r[0], r[1], r[2], truck_max_cap * t / (len(r) - 2), p)
+                    )
+                else:
+                    print("Makes {} round trip{} ({} hours per trip) from {} to {}, {}, and {}, supplying {} tonnes of {} to each.".format(
+                        t, pl, round(calc_time(r)),  r[0], r[1], r[2], r[3], truck_max_cap * t / (len(r) - 2), p)
+                    )
