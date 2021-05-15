@@ -12,20 +12,18 @@ def annual_demand(input_site, input_year):
     return result
 
 
-# calcule toutes les routes qui passent par les clients selon le centre de production
 def calc_routes(input_depot):
     if input_depot == acid_depot:
-        routes = []
+        return_routes = []
         for r in poss_routes:
             if input_depot not in r:
                 new_r = [input_depot] + r[:] + [input_depot]
-                routes.append(shortest_route(perm_route(new_r)))
+                return_routes.append(shortest_route(perm_route(new_r)))
     else:
-        routes = [['Anvers', 'Liege', 'Anvers']]
-    return routes
+        return_routes = [['Anvers', 'Liege', 'Anvers']]
+    return return_routes
 
 
-# calcule la distance par route
 def calc_dist(input_route):
     tot_dist = 0
     for i in range(1, len(input_route)):
@@ -33,7 +31,6 @@ def calc_dist(input_route):
     return tot_dist
 
 
-# calcule le temps d'un temps d'une route
 def calc_time(input_route):
     stop_time = unload_time * (len(input_route) - 1)
     road_time = calc_dist(input_route) / truck_speed
@@ -41,7 +38,6 @@ def calc_time(input_route):
     return tot_time
 
 
-# toutes les permutations d'une route (pour ensuite en prendre le plus court)
 def perm_route(input_route):
     if len(input_route) <= 3:
         return [input_route]
@@ -54,7 +50,6 @@ def perm_route(input_route):
     return routes_list
 
 
-# renvoie la route dans l'ordre de villes plus court
 def shortest_route(input_list):
     if len(input_list) == 1:
         return input_list[0]
@@ -88,7 +83,7 @@ def index_to_month(input_index):
 def index_to_year(input_index):
     return input_index // 12
 
-max_sites = 3  # car distribution de min 5 tonnes par ville
+max_sites = 3
 sites = "Anvers Bruxelles Charleroi Gand Hasselt Liege".split()
 
 acid_depot = "Liege"
@@ -137,10 +132,6 @@ distances = [
 ]
 distances = makeDict([sites, sites], distances, 0)
 
-# for s1 in sites:
-#     for s2 in sites:
-#         print("distance between {} and {} is {} and travel time is {}".format(s1, s2, distances[s1][s2], calc_time([s1, s2])))
-
 factory_switch = distances['Liege']['Anvers'] / truck_speed
 
 # create lists of all possible routes
@@ -168,10 +159,8 @@ truck_hybrid = LpVariable.dicts("truck_hybrid", vehicle_numbers, cat='Binary')
 
 truck_routes = [(v, tuple(r)) for v in vehicle_numbers for r in all_routes]
 
-# variable indicating how many times truck takes route
 truck_route_vars = LpVariable.dicts("truck_route", (truck_routes, years), 0, None, LpInteger)
 
-# annual demand met
 for y in years:
     for s in sites:
         total = 0
@@ -204,12 +193,11 @@ for y in years:
                 total += truck_route_vars[t][y] * calc_time(t[1])
         prob += total <= lpSum(truck_status[n][m] * hours_in_month for m in months[y*12:(y+1)*12]), "Max truck {} hours on year {}".format(n, y)
 
-for m in months:  # remplit la truck_buy list selon la truck_status list
+for m in months:
     for t in vehicle_numbers:
-        if m == 0 and t not in range(init_trucks):  # if first month and not in the first 10 trucks
-            prob += truck_buy[t][m] == truck_status[t][m]  # status is bought if it's available
-                                                            # status is nothing if it's not available
-        elif m == 0 and t in range(init_trucks):  # if first month and in the first 10 trucks
+        if m == 0 and t not in range(init_trucks):
+            prob += truck_buy[t][m] == truck_status[t][m]
+        elif m == 0 and t in range(init_trucks):
             prob += truck_status[t][m] == 1
             prob += truck_buy[t][m] == 0
         else:
@@ -217,7 +205,7 @@ for m in months:  # remplit la truck_buy list selon la truck_status list
             prob += truck_buy[t][m] <= 1 - truck_status[t][m - 1]
             prob += truck_buy[t][m] <= truck_status[t][m]
 
-for m in months:  # fills the truck_sell list using the truck_status list
+for m in months:
     for t in vehicle_numbers:
         if m == 0:
             prob += truck_sell[t][m] == 0
@@ -248,86 +236,9 @@ prob += lpSum(
 prob.writeLP("Chemical_Products_VRP.lp")
 status = prob.solve(solver=GLPK(msg=True, keepFiles=True, options=["--tmlim", "{}".format(time_limit)]))
 
-obj_func = 0
-
 bought_trucks = {}
 for n in vehicle_numbers:
     bought_trucks[n] = 0
-
-for y in years:
-    supply_dict = dict(annual_demand_1) if y < 3 else dict(annual_demand_2)
-    for key in supply_dict.keys():
-        supply_dict[key] = 0
-    print("\n----------------Year {}----------------\n".format(y))
-    for t in vehicle_numbers:
-        rent_list, buy_list, sell_list = [], [], []
-        for m in months[y * 12: (y+1) * 12]:
-            rent_list.append(truck_status[t][m].varValue)
-            buy_list.append(truck_buy[t][m].varValue)
-            sell_list.append(truck_sell[t][m].varValue)
-        buy_price = buy_list.count(1) * truck_buy_price
-        sell_price = sell_list.count(1) * truck_sell_price
-        rent_price = rent_list.count(1) * truck_maint_price
-        total_price = buy_price + rent_price - sell_price
-        avail_time = rent_list.count(1) * hours_in_month
-        total_time = 0
-        obj_func += total_price
-        if rent_price > 0:
-
-            bought_trucks[t] = 1
-
-            print("\n----------------Truck no {}----------------\n".format(t))
-            t_routes = {}
-            for r in all_routes:
-                if truck_route_vars[(t, tuple(r))][y].varValue is not None and truck_route_vars[(t, tuple(r))][y].varValue > 0:
-                    t_routes[tuple(r)] = truck_route_vars[(t, tuple(r))][y].varValue
-            if truck_hybrid[t].varValue == 1:
-                print("Truck delivers both products.")
-            elif truck_acid[t].varValue == 1:
-                print("Truck delivers only acids.")
-            else:
-                print("Truck delivers only bases.")
-            if buy_price > 0:
-                if sell_price > 0:
-                    print("Bought in {} and sold in {} of year {}".format(index_to_month(buy_list.index(1)), index_to_month(sell_list.index(1)), y))
-                else:
-                    print("Bought in {} and kept until the end of year {}".format(index_to_month(buy_list.index(1)), y))
-            else:
-                if sell_price > 0:
-                    print("Available from the beginning and kept until {} of year {}".format(index_to_month(sell_list.index(1)), y))
-                else:
-                    print("Available from the beginning and kept until the end of year {}".format(y))
-            print("Total cost: {} (Purchase: {}, Sell: {}, Maintenance: {})".format(
-                int(total_price), buy_price, sell_price, int(rent_price))
-            )
-            for route in t_routes.keys():
-                total_time += calc_time(route) * t_routes[route]
-                print("{} ({}-hour trip) {} times for a total of {} hours;  {} / {} hours".format(
-                    route, round(calc_time(route), 2), t_routes[route], round(calc_time(route) * t_routes[route], 2), round(total_time, 2), avail_time
-                ))
-                for city in route[1:-1]:
-                    print("Supplied {} * {} = {} to {}".format((truck_max_cap/(len(route) - 2)), t_routes[route], truck_max_cap * t_routes[route] / (len(route) - 2), city))
-                    supply_dict[city] += (16.5 * t_routes[route] / (len(route) - 2))
-            if truck_hybrid[t].varValue == 1:
-                total_time += factory_switch + cleaning_time
-                print("Additional cleaning time ({}) and travelling to other production center ({}) : {} / {} hours".format(cleaning_time, factory_switch, round(total_time, 2), avail_time))
-            print("Current supply")
-            for key in supply_dict:
-                print("{} : {} / {}".format(key, supply_dict[key], annual_demand(key, y)))
-            print("")
-
-    print("Total supply")
-    for key in supply_dict:
-        print("{} : {} / {}".format(key, supply_dict[key], annual_demand(key, y)))
-
-    print("Vehicle costs for year {} is {}.".format(y, int(obj_func)))
-    total_time, total_distance = 0, 0
-    for tr in truck_routes:
-        total_time += truck_route_vars[tr][y].varValue * calc_time(tr[1])
-        total_distance += truck_route_vars[tr][y].varValue * calc_dist(tr[1])
-    print("Total pay on year {} for {} hours is {}".format(y, round(total_time, 2), round(total_time * hourly_rate, 2)))
-    print("Total gas bill on year {} for {} km is {}".format(y, total_distance, round(total_distance * gas_rate, 2)))
-    print("Total costs for year {} is {}".format(y, int(obj_func + total_time * hourly_rate + total_distance * gas_rate)))
 
 for n in bought_trucks.keys():
     if bought_trucks[n] == 1:
@@ -342,8 +253,6 @@ for n in bought_trucks.keys():
             print("Truck delivers only bases.")
         buy_index, sell_index = 0, len(months)-1
         truck_list = [truck_status[n][i].varValue for i in months]
-        # truck_list = [truck_status[n][i].varValue for i in range(12)]
-        # print(truck_list, truck_list.count(1))
         for m in months:
             if truck_buy[n][m].varValue == 1:
                 buy_index = m
@@ -353,18 +262,7 @@ for n in bought_trucks.keys():
         for m in months[1:]:
             if truck_list[m] == 0 and truck_list[m-1] == 1:
                 index2 = m
-        # print(index1, index2)
         print("Available from {} of year {} till {} of year {}.".format(index_to_month(index1), index_to_year(index1), index_to_month(index2), index_to_year(index2)))
-        # if truck_status[n][0] == 1 and truck_buy[n][0].varValue == 0 and sell_index == len(months) - 1:
-        #     print("Available from the beginning and sold at the end.")
-        # elif truck_status[n][0] == 1 and truck_buy[n][0].varValue == 1 and sell_index == len(months) - 1:
-        #     print("Bought at the beginning and sold at the end.")
-        # elif buy_index == 0:
-        #     print("Bought at the beginning and sold in {}, year {}.".format(index_to_month(sell_index), index_to_year(sell_index)))
-        # elif sell_index == len(months)-1:
-        #     print("Bought in {}, year {} and sold at the end.".format(index_to_month(buy_index), index_to_year(buy_index)))
-        # else:
-        #     print("Bought in {}, year {} and sold in {}, year {}.".format(index_to_month(buy_index), index_to_year(buy_index), index_to_month(sell_index), index_to_year(sell_index)))
         for y in years:
             truck_status_list = truck_list[y*12:(y+1)*12]
             if truck_status_list.count(1) > 0:
@@ -386,7 +284,6 @@ for n in bought_trucks.keys():
                         extra_route = (routes_b[i-1][0], routes_b[i][0])
                         routes_b.insert(i, extra_route)
                         remaining_trips.insert(i, 1)
-                # print(remaining_trips)
                 i, j, k = truck_status_list.index(1), 0, 0
                 total1, total2 = 0, truck_status_list.count(1) * hours_in_month
                 while i < truck_status_list.index(1) + truck_status_list.count(1) and j < len(routes_b):
@@ -395,13 +292,10 @@ for n in bought_trucks.keys():
                     trip_time = calc_time(routes_b[j])
                     while j < len(routes_b) and trip_time <= available_hours and no_trips < remaining_trips[j]:
                         no_trips += 1
-                        # available_hours -= calc_time(routes[j])
                         trip_time = calc_time(routes_b[j])
                         if routes_b[j] in [['Anvers', 'Liege'], ['Liege', 'Anvers']]:
                             trip_time += cleaning_time
                         available_hours -= trip_time
-                        # print("no trips =", no_trips, "; remaining trips =", remaining_trips[j])
-                        # print("trip time =", round(calc_time(routes[j]), 2), "available hours =", round(available_hours, 1))
                         if no_trips == remaining_trips[j] or trip_time > available_hours:
                             if len(routes_b[j]) == 2:
                                 print("[{} hours] Cleaning time and travel from {} factory to {} factory in {}".format(round(no_trips * trip_time, 2), routes[j][0], routes[j][1], index_to_month(i)))
@@ -416,13 +310,7 @@ for n in bought_trucks.keys():
                                 j += 1
                     i += 1
                     k += 1
-                # print(total1, total2)
-                # print(trips_per_month)
                 i = truck_status_list.index(1)
-                # while i < truck_status_list.index(1) + truck_status_list.count(1):
-                #     print("{}: ".format(index_to_month(i)))
-                #     print("Route {} {} times".format(trips_per_month[i][0], trips_per_month[i][1]))
-                #     i += 1
                 for i in range(len(t_routes)):
                     r, t = routes[i], t_routes[i]
                     p = "acid" if r[0] == "Liege" else "base"
